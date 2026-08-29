@@ -11,6 +11,8 @@ const SAMPLE_RATE = 16_000
 const CHANNELS = 1
 const BITS_PER_SAMPLE = 16
 const MP3_VBR_QUALITY = 4
+const PCM_BYTES_PER_SECOND =
+  SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8)
 
 function pcm16LeToFloat32(pcm) {
   const audio = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm)
@@ -79,6 +81,22 @@ function writeAllSync(fileDescriptor, buffer) {
   }
 }
 
+function formatByteSize(bytes) {
+  if (bytes < 1_024) return `${bytes} B`
+
+  const kibibytes = bytes / 1_024
+  if (kibibytes < 1_024) return `${kibibytes.toFixed(1)} KiB`
+
+  return `${(kibibytes / 1_024).toFixed(1)} MiB`
+}
+
+function formatRecordingProgress(pcmBytes, mp3Bytes) {
+  // MP3 output is variable-bitrate and buffered, so its byte count cannot be
+  // converted directly to duration. PCM bytes give the exact captured samples.
+  const seconds = pcmBytes / PCM_BYTES_PER_SECOND
+  return `Recorded ${seconds.toFixed(1)} seconds | ${formatByteSize(mp3Bytes)} MP3`
+}
+
 function microphonePermissionError(status) {
   if (status === 1) {
     return 'Microphone access is restricted by the operating system.'
@@ -110,7 +128,8 @@ async function main() {
   let acceptingAudio = false
   let shuttingDown = false
   let fileFinished = false
-  let progressTimer = null
+  let lastProgressTime = null
+  let progressLineActive = false
   let shutdownTimer = null
   const outputPath = path.resolve(process.cwd(), OUTPUT_FILENAME)
 
@@ -119,6 +138,21 @@ async function main() {
     const copy = Buffer.from(chunk)
     writeAllSync(fileDescriptor, copy)
     mp3Bytes += copy.length
+  }
+
+  function updateProgress() {
+    // Redraw from real capture callbacks instead of estimating from a timer.
+    const progressTime = (pcmBytes / PCM_BYTES_PER_SECOND).toFixed(1)
+    if (progressTime === lastProgressTime) return
+    lastProgressTime = progressTime
+    progressLineActive = true
+    process.stdout.write(`\r${formatRecordingProgress(pcmBytes, mp3Bytes)}`)
+  }
+
+  function endProgressLine() {
+    if (!progressLineActive) return
+    progressLineActive = false
+    process.stdout.write('\n')
   }
 
   function finishFile(exitCode, precedingError) {
@@ -146,14 +180,17 @@ async function main() {
     }
 
     if (precedingError || closeError) {
+      endProgressLine()
       console.error(`Recording failed: ${(precedingError || closeError).message}`)
       process.exitCode = 1
       return
     }
 
-    const seconds = pcmBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
+    const seconds = pcmBytes / PCM_BYTES_PER_SECOND
+    endProgressLine()
+    const size = formatByteSize(mp3Bytes)
     console.log(
-      `Saved ${outputPath} (${seconds.toFixed(1)} seconds, ${mp3Bytes} MP3 bytes).`,
+      `Saved ${outputPath} (${seconds.toFixed(1)} seconds, ${size} MP3).`,
     )
     process.exitCode = exitCode
   }
@@ -170,11 +207,6 @@ async function main() {
       return
     }
     shuttingDown = true
-
-    if (progressTimer !== null) {
-      clearInterval(progressTimer)
-      progressTimer = null
-    }
 
     try {
       if (addon && addon.isRecording()) {
@@ -216,7 +248,6 @@ async function main() {
     acceptingAudio = true
 
     process.once('SIGINT', () => {
-      process.stdout.write('\n')
       stopRecording()
     })
     process.once('SIGTERM', () => stopRecording())
@@ -233,6 +264,7 @@ async function main() {
           const samples = pcm16LeToFloat32(audio)
           writeEncodedChunk(encoder.encode([samples]))
           pcmBytes += audio.length
+          updateProgress()
         } catch (error) {
           stopRecording(1, error)
         }
@@ -249,11 +281,6 @@ async function main() {
     console.log(`Recording microphone audio to ${outputPath}`)
     console.log('Press Ctrl+C to stop, finalize, and close the MP3 file.')
 
-    progressTimer = setInterval(() => {
-      const seconds =
-        pcmBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
-      process.stdout.write(`\rRecorded ${seconds.toFixed(1)} seconds`)
-    }, 1_000)
   } catch (error) {
     if (fileDescriptor !== null || (addon && addon.isRecording())) {
       stopRecording(1, error)
@@ -274,5 +301,7 @@ module.exports = {
   MP3_VBR_QUALITY,
   OUTPUT_FILENAME,
   SAMPLE_RATE,
+  formatByteSize,
+  formatRecordingProgress,
   pcm16LeToFloat32,
 }

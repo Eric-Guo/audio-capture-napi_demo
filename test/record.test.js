@@ -10,6 +10,8 @@ const {
   MP3_VBR_QUALITY,
   OUTPUT_FILENAME,
   SAMPLE_RATE,
+  formatByteSize,
+  formatRecordingProgress,
   pcm16LeToFloat32,
 } = require('../record.js')
 
@@ -26,6 +28,16 @@ test('converts signed 16-bit little-endian PCM to normalized floats', () => {
 
 test('rejects a partial 16-bit PCM sample', () => {
   assert.throws(() => pcm16LeToFloat32(Buffer.alloc(1)), RangeError)
+})
+
+test('formats recording progress from captured PCM and written MP3 bytes', () => {
+  assert.equal(formatByteSize(0), '0 B')
+  assert.equal(formatByteSize(1_024), '1.0 KiB')
+  assert.equal(formatByteSize(1_048_576), '1.0 MiB')
+  assert.equal(
+    formatRecordingProgress(32_000, 2_048),
+    'Recorded 1.0 seconds | 2.0 KiB MP3',
+  )
 })
 
 test('uses mono 16 kHz PCM and writes an MP3', () => {

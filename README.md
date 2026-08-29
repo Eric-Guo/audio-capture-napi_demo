@@ -17,6 +17,10 @@ Speak into the default microphone, then press Ctrl+C. The program always
 overwrites `recording.mp3` in the current working directory. Before it exits,
 it flushes the MP3 encoder and closes the file.
 
+The live progress line is driven by captured audio chunks, not elapsed wall
+clock time. It reports sample-derived recording duration together with the MP3
+bytes written to disk.
+
 The captured input is mono, 16 kHz, signed 16-bit PCM. It is encoded as a
 variable-bitrate MP3 with LAME quality 4. Supported packaged targets are macOS,
 Linux, and Windows on arm64 or x64.

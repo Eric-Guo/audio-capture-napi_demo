@@ -2,7 +2,7 @@
   "name": "audio-capture-napi-demo",
   "version": "1.0.0",
   "private": true,
-  "description": "Small standalone microphone-to-WAV demo for audio-capture-napi",
+  "description": "Small standalone microphone-to-MP3 demo for audio-capture-napi",
   "main": "record.js",
   "scripts": {
     "start": "node record.js",
@@ -10,5 +10,8 @@
   },
   "engines": {
     "node": ">=26.7.0"
+  },
+  "dependencies": {
+    "wasm-media-encoders": "^0.7.0"
   }
 }

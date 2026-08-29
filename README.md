@@ -1,8 +1,8 @@
-# audio-capture-napi demo
+# audio-capture-napi MP3 demo
 
 A tiny, standalone Node.js 26.7 microphone recorder. It uses the vendored
-`audio-capture-napi` native addon and does not import anything from the
-`claude-code` project at runtime.
+`audio-capture-napi` native addon and `wasm-media-encoders`' WebAssembly LAME
+encoder. It does not import anything from the `claude-code` project at runtime.
 
 ## Run
 
@@ -14,11 +14,12 @@ node record.js
 Node sole ownership of Ctrl+C on every shell.
 
 Speak into the default microphone, then press Ctrl+C. The program always
-overwrites `recording.wav` in the current working directory. Before it exits,
-it writes the final WAV sizes, flushes the data, and closes the file.
+overwrites `recording.mp3` in the current working directory. Before it exits,
+it flushes the MP3 encoder and closes the file.
 
-The recording format is mono, 16 kHz, signed 16-bit PCM. Supported packaged
-targets are macOS, Linux, and Windows on arm64 or x64.
+The captured input is mono, 16 kHz, signed 16-bit PCM. It is encoded as a
+variable-bitrate MP3 with LAME quality 4. Supported packaged targets are macOS,
+Linux, and Windows on arm64 or x64.
 
 On macOS, allow microphone access for the application that launches Node.js
 (for example Terminal or Codex) under **System Settings > Privacy & Security >

@@ -4,42 +4,25 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
+const { createMp3Encoder } = require('wasm-media-encoders')
 
-const OUTPUT_FILENAME = 'recording.wav'
+const OUTPUT_FILENAME = 'recording.mp3'
 const SAMPLE_RATE = 16_000
 const CHANNELS = 1
 const BITS_PER_SAMPLE = 16
-const WAV_HEADER_BYTES = 44
-const MAX_WAV_DATA_BYTES = 0xffffffff - 36
+const MP3_VBR_QUALITY = 4
 
-function createWavHeader(dataBytes) {
-  if (!Number.isSafeInteger(dataBytes) || dataBytes < 0) {
-    throw new RangeError('dataBytes must be a non-negative safe integer')
-  }
-  if (dataBytes > MAX_WAV_DATA_BYTES) {
-    throw new RangeError('Recording is too large for a standard WAV file')
+function pcm16LeToFloat32(pcm) {
+  const audio = Buffer.isBuffer(pcm) ? pcm : Buffer.from(pcm)
+  if (audio.length % (BITS_PER_SAMPLE / 8) !== 0) {
+    throw new RangeError('PCM chunk must contain complete 16-bit samples')
   }
 
-  const bytesPerSample = BITS_PER_SAMPLE / 8
-  const blockAlign = CHANNELS * bytesPerSample
-  const byteRate = SAMPLE_RATE * blockAlign
-  const header = Buffer.alloc(WAV_HEADER_BYTES)
-
-  header.write('RIFF', 0, 'ascii')
-  header.writeUInt32LE(36 + dataBytes, 4)
-  header.write('WAVE', 8, 'ascii')
-  header.write('fmt ', 12, 'ascii')
-  header.writeUInt32LE(16, 16)
-  header.writeUInt16LE(1, 20) // PCM
-  header.writeUInt16LE(CHANNELS, 22)
-  header.writeUInt32LE(SAMPLE_RATE, 24)
-  header.writeUInt32LE(byteRate, 28)
-  header.writeUInt16LE(blockAlign, 32)
-  header.writeUInt16LE(BITS_PER_SAMPLE, 34)
-  header.write('data', 36, 'ascii')
-  header.writeUInt32LE(dataBytes, 40)
-
-  return header
+  const samples = new Float32Array(audio.length / (BITS_PER_SAMPLE / 8))
+  for (let index = 0; index < samples.length; index += 1) {
+    samples[index] = audio.readInt16LE(index * 2) / 32_768
+  }
+  return samples
 }
 
 function requireNode267OrNewer() {
@@ -118,10 +101,12 @@ function microphonePermissionError(status) {
   return null
 }
 
-function main() {
+async function main() {
   let addon
+  let encoder
   let fileDescriptor = null
-  let dataBytes = 0
+  let pcmBytes = 0
+  let mp3Bytes = 0
   let acceptingAudio = false
   let shuttingDown = false
   let fileFinished = false
@@ -129,15 +114,11 @@ function main() {
   let shutdownTimer = null
   const outputPath = path.resolve(process.cwd(), OUTPUT_FILENAME)
 
-  function updateWavHeader() {
-    if (fileDescriptor === null) return
-    fs.writeSync(
-      fileDescriptor,
-      createWavHeader(dataBytes),
-      0,
-      WAV_HEADER_BYTES,
-      0,
-    )
+  function writeEncodedChunk(chunk) {
+    if (chunk.length === 0) return
+    const copy = Buffer.from(chunk)
+    writeAllSync(fileDescriptor, copy)
+    mp3Bytes += copy.length
   }
 
   function finishFile(exitCode, precedingError) {
@@ -148,7 +129,9 @@ function main() {
 
     if (fileDescriptor !== null) {
       try {
-        updateWavHeader()
+        if (encoder) {
+          writeEncodedChunk(encoder.finalize())
+        }
         fs.fsyncSync(fileDescriptor)
       } catch (error) {
         closeError = error
@@ -168,15 +151,16 @@ function main() {
       return
     }
 
-    const seconds = dataBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
+    const seconds = pcmBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
     console.log(
-      `Saved ${outputPath} (${seconds.toFixed(1)} seconds, ${dataBytes} PCM bytes).`,
+      `Saved ${outputPath} (${seconds.toFixed(1)} seconds, ${mp3Bytes} MP3 bytes).`,
     )
     process.exitCode = exitCode
   }
 
   function stopRecording(exitCode = 0, error = null) {
     if (fileFinished) return
+    if (error) acceptingAudio = false
     if (shuttingDown) {
       if (shutdownTimer !== null) {
         clearTimeout(shutdownTimer)
@@ -221,8 +205,14 @@ function main() {
       throw new Error(permissionError)
     }
 
+    encoder = await createMp3Encoder()
+    encoder.configure({
+      sampleRate: SAMPLE_RATE,
+      channels: CHANNELS,
+      vbrQuality: MP3_VBR_QUALITY,
+    })
+
     fileDescriptor = fs.openSync(outputPath, 'w')
-    writeAllSync(fileDescriptor, createWavHeader(0))
     acceptingAudio = true
 
     process.once('SIGINT', () => {
@@ -239,17 +229,10 @@ function main() {
         if (!acceptingAudio) return
         const audio = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
 
-        if (dataBytes + audio.length > MAX_WAV_DATA_BYTES) {
-          stopRecording(1, new Error('Recording exceeded the WAV 4 GiB limit'))
-          return
-        }
-
         try {
-          writeAllSync(fileDescriptor, audio)
-          dataBytes += audio.length
-          // Keep the on-disk file self-consistent after every chunk. This
-          // preserves a valid WAV even if a parent launcher exits abruptly.
-          updateWavHeader()
+          const samples = pcm16LeToFloat32(audio)
+          writeEncodedChunk(encoder.encode([samples]))
+          pcmBytes += audio.length
         } catch (error) {
           stopRecording(1, error)
         }
@@ -264,11 +247,11 @@ function main() {
     }
 
     console.log(`Recording microphone audio to ${outputPath}`)
-    console.log('Press Ctrl+C to stop, finalize, and close the WAV file.')
+    console.log('Press Ctrl+C to stop, finalize, and close the MP3 file.')
 
     progressTimer = setInterval(() => {
       const seconds =
-        dataBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
+        pcmBytes / (SAMPLE_RATE * CHANNELS * (BITS_PER_SAMPLE / 8))
       process.stdout.write(`\rRecorded ${seconds.toFixed(1)} seconds`)
     }, 1_000)
   } catch (error) {
@@ -288,7 +271,8 @@ if (require.main === module) {
 module.exports = {
   BITS_PER_SAMPLE,
   CHANNELS,
+  MP3_VBR_QUALITY,
   OUTPUT_FILENAME,
   SAMPLE_RATE,
-  createWavHeader,
+  pcm16LeToFloat32,
 }

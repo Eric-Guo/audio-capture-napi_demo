@@ -2,34 +2,54 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
+const { createMp3Encoder } = require('wasm-media-encoders')
 
 const {
   BITS_PER_SAMPLE,
   CHANNELS,
+  MP3_VBR_QUALITY,
   OUTPUT_FILENAME,
   SAMPLE_RATE,
-  createWavHeader,
+  pcm16LeToFloat32,
 } = require('../record.js')
 
-test('creates a valid PCM WAV header', () => {
-  const dataBytes = 32_000
-  const header = createWavHeader(dataBytes)
+test('converts signed 16-bit little-endian PCM to normalized floats', () => {
+  const pcm = Buffer.alloc(8)
+  pcm.writeInt16LE(-32_768, 0)
+  pcm.writeInt16LE(-16_384, 2)
+  pcm.writeInt16LE(0, 4)
+  pcm.writeInt16LE(32_767, 6)
 
-  assert.equal(header.length, 44)
-  assert.equal(header.toString('ascii', 0, 4), 'RIFF')
-  assert.equal(header.readUInt32LE(4), 36 + dataBytes)
-  assert.equal(header.toString('ascii', 8, 12), 'WAVE')
-  assert.equal(header.toString('ascii', 12, 16), 'fmt ')
-  assert.equal(header.readUInt16LE(20), 1)
-  assert.equal(header.readUInt16LE(22), CHANNELS)
-  assert.equal(header.readUInt32LE(24), SAMPLE_RATE)
-  assert.equal(header.readUInt16LE(34), BITS_PER_SAMPLE)
-  assert.equal(header.toString('ascii', 36, 40), 'data')
-  assert.equal(header.readUInt32LE(40), dataBytes)
-  assert.equal(OUTPUT_FILENAME, 'recording.wav')
+  const samples = pcm16LeToFloat32(pcm)
+  assert.deepEqual(Array.from(samples), [-1, -0.5, 0, 32_767 / 32_768])
 })
 
-test('rejects an invalid PCM byte count', () => {
-  assert.throws(() => createWavHeader(-1), RangeError)
-  assert.throws(() => createWavHeader(1.5), RangeError)
+test('rejects a partial 16-bit PCM sample', () => {
+  assert.throws(() => pcm16LeToFloat32(Buffer.alloc(1)), RangeError)
+})
+
+test('uses mono 16 kHz PCM and writes an MP3', () => {
+  assert.equal(BITS_PER_SAMPLE, 16)
+  assert.equal(CHANNELS, 1)
+  assert.equal(SAMPLE_RATE, 16_000)
+  assert.equal(MP3_VBR_QUALITY, 4)
+  assert.equal(OUTPUT_FILENAME, 'recording.mp3')
+})
+
+test('encodes and finalizes MPEG audio with the WASM encoder', async () => {
+  const encoder = await createMp3Encoder()
+  encoder.configure({
+    sampleRate: SAMPLE_RATE,
+    channels: CHANNELS,
+    vbrQuality: MP3_VBR_QUALITY,
+  })
+
+  const samples = new Float32Array(SAMPLE_RATE)
+  const encoded = Buffer.from(encoder.encode([samples]))
+  const finalized = Buffer.from(encoder.finalize())
+  const mp3 = Buffer.concat([encoded, finalized])
+
+  assert.ok(mp3.length > 0)
+  assert.equal(mp3[0], 0xff)
+  assert.equal(mp3[1] & 0xe0, 0xe0)
 })

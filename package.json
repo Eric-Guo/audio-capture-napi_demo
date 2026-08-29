@@ -1,0 +1,14 @@
+{
+  "name": "audio-capture-napi-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small standalone microphone-to-WAV demo for audio-capture-napi",
+  "main": "record.js",
+  "scripts": {
+    "start": "node record.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=26.7.0"
+  }
+}

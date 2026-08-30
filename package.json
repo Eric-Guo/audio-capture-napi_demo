@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "in-memory microphone-to-MP3 recorder for Node.js",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },  
   "sideEffects": false,
   "type": "module",
   "main": "./dist/index.js",

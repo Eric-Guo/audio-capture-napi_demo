@@ -1,17 +1,40 @@
 {
-  "name": "audio-capture-napi-demo",
+  "name": "@mixtint/audio-recorder-node",
   "version": "1.0.0",
-  "private": true,
-  "description": "Small standalone microphone-to-MP3 demo for audio-capture-napi",
-  "main": "record.js",
+  "description": "in-memory microphone-to-MP3 recorder for Node.js",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "examples",
+    "vendor",
+    "README.md"
+  ],
   "scripts": {
-    "start": "node record.js",
-    "test": "node --test"
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('dist', { recursive: true, force: true }))\"",
+    "example": "node examples/record.mjs",
+    "prepack": "npm run clean && npm run build",
+    "test": "npm run build && node --test",
+    "test:pack": "npm pack --dry-run"
   },
   "engines": {
     "node": ">=26.7.0"
   },
   "dependencies": {
     "wasm-media-encoders": "^0.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
   }
 }

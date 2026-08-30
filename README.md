@@ -1,36 +1,72 @@
-# audio-capture-napi MP3 demo
+# Introduction
 
-A tiny, standalone Node.js 26.7 microphone recorder. It uses the vendored
-`audio-capture-napi` native addon and `wasm-media-encoders`' WebAssembly LAME
-encoder. It does not import anything from the `claude-code` project at runtime.
+ESM-only microphone recording for Node.js 26.7 and newer. The library
+captures mono, 16 kHz, signed 16-bit PCM and returns an in-memory MP3 encoded
+with LAME VBR quality 4.
 
-## Run
+Native N-API capture is preferred on macOS, Linux, and Windows. Linux uses
+`arecord` as its only fallback after opening a real capture device in a short
+probe. 
 
-```sh
-node record.js
+The package has no playback, silence auto-stop, speech-to-text, or file
+output behavior.
+
+## API
+
+```js
+import {
+  checkAvailability,
+  createRecorder,
+} from '@mixtint/audio-recorder-node'
+
+const availability = await checkAvailability()
+if (!availability.available) {
+  throw new Error(availability.guidance ?? availability.errorMessage)
+}
+
+const recorder = createRecorder({ maxDurationMs: 5 * 60_000 })
+const started = await recorder.start()
+const mp3 = await recorder.stop(started.recordingID)
+await recorder.dispose()
 ```
 
-`npm start` is also available, but running the JavaScript file directly gives
-Node sole ownership of Ctrl+C on every shell.
+`start()` resolves to a structured status with a UUID recording ID. `stop(id)`
+resolves to `Uint8Array` MP3 bytes. Repeating `stop()` for the retained ID is
+idempotent and returns identical bytes. A completed result remains in memory
+until another backend successfully starts recording.
 
-Speak into the default microphone, then press Ctrl+C. The program always
-overwrites `recording.mp3` in the current working directory. Before it exits,
-it flushes the MP3 encoder and closes the file.
+`status()` reports the lifecycle (`idle`, `starting`, `recording`, `stopping`,
+`completed`, or `failed`), active backend, Unix-millisecond timestamps,
+sample-derived duration and progress, availability and permission information,
+environment classification, error details, and actionable guidance.
 
-The live progress line is driven by captured audio chunks, not elapsed wall
-clock time. It reports sample-derived recording duration together with the MP3
-bytes written to disk.
+Recorder options are:
 
-The captured input is mono, 16 kHz, signed 16-bit PCM. It is encoded as a
-variable-bitrate MP3 with LAME quality 4. Supported packaged targets are macOS,
-Linux, and Windows on arm64 or x64.
+- `nativeAddonPath`: load a native addon extracted elsewhere, such as beside a
+  single-executable application.
+- `maxDurationMs`: optional positive duration limit; omitted by default.
+- `remoteEnvironmentHint`: reject capture when the host is known not to own the
+  user's microphone.
 
-On macOS, allow microphone access for the application that launches Node.js
-(for example Terminal or Codex) under **System Settings > Privacy & Security >
-Microphone**.
+`checkAvailability({ refresh: true })` bypasses its process-wide cached result.
 
-## Test
+## Packaged targets
+
+The package includes native binaries for arm64 and x64 on macOS, Linux, and
+Windows. On Linux without a usable ALSA card, install `alsa-utils`; WSL audio
+requires WSL2 with WSLg or native Windows execution.
+
+On macOS, grant microphone access to the application that launches Node.js in
+**System Settings > Privacy & Security > Microphone**. On Windows, use
+**Settings > Privacy & security > Microphone**.
+
+## Development
 
 ```sh
-npm test
+pnpm install
+pnpm test
+pnpm run test:pack
 ```
+
+Run `pnpm example`, speak, and press Ctrl+C to write `recording.mp3`. Signal
+handling and file output live only in that example.

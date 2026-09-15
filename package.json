@@ -1,11 +1,11 @@
 {
   "name": "@mixtint/audio-recorder-node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "in-memory microphone-to-MP3 recorder for Node.js",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
-  },  
+  },
   "sideEffects": false,
   "type": "module",
   "main": "./dist/index.js",
@@ -37,7 +37,7 @@
     "wasm-media-encoders": "^0.7.0"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "typescript": "^5.9.2"
+    "@types/node": "^24.13.4",
+    "typescript": "^5.9.3"
   }
 }

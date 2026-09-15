@@ -59,7 +59,7 @@ interface RetainedRecording {
 
 interface Session {
   id: string
-  encoder: Mp3Encoder
+  encoder: Mp3Encoder | null
   addon: NativeAudioAddon | null
   child: ChildProcess | null
   backend: RecorderBackend | null
@@ -124,6 +124,7 @@ export class AudioRecorder implements Recorder {
   #disposed = false
   #session: Session | null = null
   #retained: RetainedRecording | null = null
+  #failure: { id: string; error: RecorderError } | null = null
   #availability = { ...INITIAL_AVAILABILITY }
   #status: RecorderStatus = {
     state: 'idle',
@@ -230,6 +231,7 @@ export class AudioRecorder implements Recorder {
       })
       const session = this.#createSession(recordingID, encoder, inspection.addon)
       this.#session = session
+      this.#failure = null
 
       let started = false
       if (inspection.status.backend === 'native' && inspection.addon) {
@@ -321,6 +323,7 @@ export class AudioRecorder implements Recorder {
     if (this.#retained?.id === recordingID) {
       return copyBytes(this.#retained.bytes)
     }
+    if (this.#failure?.id === recordingID) throw this.#failure.error
     const session = this.#session
     if (!session || session.id !== recordingID) {
       throw recorderError(
@@ -526,7 +529,7 @@ export class AudioRecorder implements Recorder {
     session: Session,
     chunk: Uint8Array | readonly number[],
   ): void {
-    if (this.#session !== session || !session.acceptingAudio) return
+    if (this.#session !== session || !session.acceptingAudio || !session.encoder) return
     try {
       // The native addon currently supplies a plain number[] on macOS even
       // though its historical wrapper typed callbacks as Buffer. Normalize at
@@ -608,7 +611,8 @@ export class AudioRecorder implements Recorder {
     if (
       this.#session !== session ||
       !session.finalizationStarted ||
-      session.finalized
+      session.finalized ||
+      !session.encoder
     ) {
       return
     }
@@ -638,6 +642,10 @@ export class AudioRecorder implements Recorder {
     const artifact = concatBytes(session.encodedChunks)
     const endedAt = this.#runtime.now()
     this.#updateProgress(session)
+    // Native callbacks can outlive capture; release the encoder and chunks too.
+    session.encoder = null
+    session.encodedChunks = []
+    this.#session = null
     if (isValidMp3(artifact)) {
       this.#retained = { id: session.id, bytes: copyBytes(artifact) }
       const partialError = session.terminalError ?? finalizationError
@@ -682,6 +690,7 @@ export class AudioRecorder implements Recorder {
       errorMessage: failure.message,
       guidance: this.#guidanceForError(failure.code),
     }
+    this.#failure = { id: session.id, error: failure }
     session.rejectResult(failure)
   }
 
@@ -724,11 +733,13 @@ export class AudioRecorder implements Recorder {
     if (!session.finalized) {
       session.finalized = true
       try {
-        session.encoder.finalize()
+        session.encoder?.finalize()
       } catch {
         // The start failure remains the actionable error.
       }
     }
+    session.encoder = null
+    session.encodedChunks = []
     session.resolveResult(new Uint8Array())
     if (this.#session === session) this.#session = null
   }

@@ -27,7 +27,7 @@
     "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('dist', { recursive: true, force: true }))\"",
     "example": "node examples/record.mjs",
     "prepack": "npm run clean && npm run build",
-    "test": "npm run build && node --test",
+    "test": "npm run build && node --expose-gc --test",
     "test:pack": "npm pack --dry-run"
   },
   "engines": {

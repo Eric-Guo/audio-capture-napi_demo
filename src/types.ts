@@ -94,6 +94,7 @@ export interface RecorderStatus {
 export interface Recorder {
   start(): Promise<RecorderStatus>
   stop(recordingID: string): Promise<Uint8Array>
+  release(recordingID: string): void
   status(): RecorderStatus
   dispose(): Promise<void>
 }

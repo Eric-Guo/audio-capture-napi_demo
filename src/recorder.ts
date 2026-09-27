@@ -55,6 +55,7 @@ export function createRecorderDependencies(): RecorderDependencies {
 interface RetainedRecording {
   id: string
   bytes: Uint8Array
+  session: Session
 }
 
 interface Session {
@@ -340,6 +341,31 @@ export class AudioRecorder implements Recorder {
     }
     this.#requestSessionStop(session, 'manual', null, NATIVE_DRAIN_MS)
     return session.resultPromise
+  }
+
+  release(recordingID: string): void {
+    if (this.#session?.id === recordingID) {
+      throw recorderError(
+        'RECORDER_BUSY',
+        `Recording ${recordingID} is still active.`,
+      )
+    }
+    if (this.#retained?.id !== recordingID) {
+      throw recorderError(
+        'RECORDING_ID_MISMATCH',
+        `Recording ${recordingID} is not retained.`,
+      )
+    }
+    // Native callbacks can keep the capture session alive after stop. Its
+    // settled promise also owns an MP3 copy, so release that reference too.
+    this.#retained.session.resultPromise = Promise.resolve(new Uint8Array())
+    this.#retained.session.resolveResult = () => {}
+    this.#retained.session.rejectResult = () => {}
+    this.#retained = null
+    // Preserve duration and progress while indicating that Stop has no result.
+    if (this.#status.recordingID === recordingID) {
+      this.#status = { ...this.#status, recordingID: null }
+    }
   }
 
   async dispose(): Promise<void> {
@@ -647,7 +673,7 @@ export class AudioRecorder implements Recorder {
     session.encodedChunks = []
     this.#session = null
     if (isValidMp3(artifact)) {
-      this.#retained = { id: session.id, bytes: copyBytes(artifact) }
+      this.#retained = { id: session.id, bytes: copyBytes(artifact), session }
       const partialError = session.terminalError ?? finalizationError
       this.#status = {
         ...this.#status,

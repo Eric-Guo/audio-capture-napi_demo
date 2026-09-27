@@ -35,6 +35,13 @@ resolves to `Uint8Array` MP3 bytes. Repeating `stop()` for the retained ID is
 idempotent and returns identical bytes. A completed result remains in memory
 until another backend successfully starts recording.
 
+`release(id)` drops the retained MP3 bytes and its capture session references
+once a completed result has been consumed, freeing that memory without waiting
+for the next recording. It throws `RECORDER_BUSY` while the ID is still
+recording and `RECORDING_ID_MISMATCH` when the ID is not the retained result.
+After release, `stop(id)` for that ID fails, and the status keeps its duration
+and progress but clears the recording ID.
+
 `status()` reports the lifecycle (`idle`, `starting`, `recording`, `stopping`,
 `completed`, or `failed`), active backend, Unix-millisecond timestamps,
 sample-derived duration and progress, availability and permission information,
